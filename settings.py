@@ -1,0 +1,4 @@
+DEBUG = True
+
+D_TOKEN = '1743245807:AAEgo0k07kYcvf_jZNOlMAeYyNMnf78jZWs'
+R_TOKEN = ''
