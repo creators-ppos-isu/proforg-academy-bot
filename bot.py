@@ -16,16 +16,12 @@ async def send_welcome(message: types.Message):
     await message.reply("Hi!\nI'm EchoBot!\nPowered by aiogram.")
 
 
-@dp.message_handler()
-async def echo(message: types.Message):
-    await message.answer(message.text)
-
-
 @dp.message_handler(content_types=["photo"])
 async def a(message: types.Message): 
     await message.answer('Перекидываем фото...')
     await bot.send_photo(596546865, message.photo[-1].file_id)
-    log.info('Get photo')
+    log.info(f'Recieve photo: {message.from_user.id} -> 596546865')
+
 
 if __name__ == '__main__':
     executor.start_polling(dp)
