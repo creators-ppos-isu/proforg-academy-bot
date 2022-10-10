@@ -10,11 +10,14 @@ class Sql:
         return db.cursor()
 
     def select(self, query: str, size=1):
+        """
+        :param size: 1 - fetchone (default), 0 - all, else - many
+        """
         cursor = self._get_cursor()
         cursor.execute(query)
         if size == 1:
             return cursor.fetchone()
-        if size == -1:
+        if size == 0:
             return cursor.fetchall()
         return cursor.fetchmany(size)
 
