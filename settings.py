@@ -1,7 +1,13 @@
+from os import environ
+from dotenv import load_dotenv
+
+load_dotenv()
+
+
 DEBUG = True
 
-D_TOKEN = '1743245807:AAEgo0k07kYcvf_jZNOlMAeYyNMnf78jZWs'
-R_TOKEN = ''
+D_TOKEN = environ.get('D_TOKEN')
+R_TOKEN = environ.get('R_TOKEN')
 
 TASKS = (
     ('Почистить зубы', 'Почистить зубы сегодня с утра, потому что это очень важно!'), 

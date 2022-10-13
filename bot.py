@@ -39,7 +39,7 @@ async def send_welcome(message: types.Message):
 @dp.message_handler(lambda message: message.text == 'Выбрать задание')
 async def choose_task(message: types.Message):
     tasks = await get_tasks(message)
-    if tasks is None:
+    if not tasks:
         await message.answer('Больше нет доступных заданий!')
         return
     await message.answer('Выберите задание', reply_markup=modules.markup.inline(tasks))
@@ -51,15 +51,27 @@ async def verify_task(message: types.Message):
         await message.answer('Нужно выбрать задание нажав на кнопку под полем ввода сообщений!')
         return 
     
-    await message.answer('Перекидываем фото...')
     user_id, task_id = sql.select(f"SELECT USER_ID, current_task FROM users WHERE TG_ID={message.from_user.id}")
+    task_title = sql.select(f"SELECT title FROM tasks WHERE TASK_ID={task_id}")[0]
+    user_table = f"user_{message.from_user.id}"
+    task_score = sql.select(f"SELECT score FROM {user_table} WHERE task={task_id}")
+    
+    if not task_score:
+        sql.update(f"INSERT INTO {user_table}(task, score) VALUES({task_id}, 0);")
 
-    buttons = modules.markup.inline([{'text': '⭐️'*value,'callback': f'rate;{user_id};{task_id};{value}'} for value in range(1, 6)])
+    elif task_score[0] == 0:
+        await message.answer(f"Вы уже отправили ответ на это задание! Ждите оценки куратора.\n\nЧтобы выбрать другое активное задание, нажмите на кнопку под полем ввода")
+        return
 
+    await message.answer('Отправляю фотографию куратору...')
+
+    buttons = [{'text': '⭐️'*value,'callback': f'rate;{user_id};{task_id};{value}'} for value in range(1, 6)]
+    buttons.append({'text': 'Отклонить задание', 'callback': f'reject;{user_id};{task_id};0'})
+    
     await bot.send_photo(596546865, message.photo[-1].file_id, 
-        caption=f"Ответ по заданию {task_id}",
-        reply_markup=buttons)
-    log.info(f'Recieve photo: {message.from_user.id} -> 596546865')
+                        caption=f"Ответ по заданию {task_title}\n\nID пользователя: {user_id}\nID задания: {task_id}",
+                        reply_markup=modules.markup.inline(buttons))
+    log.info(f'Send photo: {message.from_user.id} -> 596546865; Task ID: {task_id}')
 
 
 @dp.callback_query_handler()
@@ -69,23 +81,31 @@ async def callback_check(callback: types.CallbackQuery):
     action, user_id, task_id, value =  callback.data.split(';')
     user_id, task_id, value = int(user_id), int(task_id), int(value)
 
+    task_title = sql.select(f"SELECT title FROM tasks WHERE TASK_ID={task_id}")[0]
+    tg_id = sql.select(f"SELECT TG_ID FROM users WHERE USER_ID={user_id}")[0]
+    user_table = f"user_{tg_id}"
+
     if action == 'rate':
-        tg_id = sql.select(f"SELECT TG_ID FROM users WHERE USER_ID={user_id}")[0]
-        user_table = f"user_{tg_id}"
-        sql.update(f"INSERT INTO {user_table}(task, score) VALUES({task_id}, {value});")
         sql.update(f"UPDATE {user_table} SET score={value} WHERE task={task_id}")
-        sql.update(f"UPDATE users SET score=score+{value} WHERE USER_ID={user_id}")
+        sql.update(f"UPDATE users SET score=score+{value}, current_task=NULL WHERE USER_ID={user_id}")
 
         await bot.send_message(tg_id, f'Вам начисленно {value} баллов!')
 
+    if action == 'reject':
+        sql.update(f"DELETE FROM {user_table} WHERE task={task_id}")
+
+        await bot.send_message(tg_id, f"Задание {task_title} отклоненно куратором")
+
     if action == 'settask':
-        task_title = sql.select(f"SELECT title FROM tasks WHERE TASK_ID={task_id}")[0]
+        sql.update(f'UPDATE users SET current_task={task_id} WHERE USER_ID={user_id}')
 
         await callback.message.answer(f'Вы выбрали {task_title} в качестве активного задания!')
-        sql.update(f'UPDATE users SET current_task={task_id} WHERE USER_ID={user_id}')
 
 
 if __name__ == '__main__':
+    if settings.DEBUG == False:
+        log.warning("Start On Release Bot")
+
     sql.create_table("users", """
         USER_ID INTEGER PRIMARY KEY AUTOINCREMENT, 
         TG_ID INT, 
