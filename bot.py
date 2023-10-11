@@ -5,14 +5,15 @@ from aiogram.contrib.fsm_storage.memory import MemoryStorage
 from aiogram.dispatcher import FSMContext
 import settings
 import modules
+from modules import sqlmanager
 import messages
 
 log = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO, format="[%(levelname)s] - %(asctime)s - %(message)s", encoding='utf-8', filename='log.log')
-token = settings.D_TOKEN if settings.DEBUG else settings.R_TOKEN
-bot = Bot(token=token)
+# token = settings.D_TOKEN if settings.DEBUG else settings.R_TOKEN
+bot = Bot(token=settings.TOKEN)
 dp = Dispatcher(bot, storage=MemoryStorage())
-sql = modules.sqlmanager.Sql()
+sql = sqlmanager.Sql()
 
 
 class Form(StatesGroup):
@@ -24,7 +25,7 @@ async def get_tasks(message: types.Message):
     completed_tasks = sql.select(f"SELECT task FROM user_{message.from_user.id}", 0)
     available_tasks = [task[0] for task in all_task if task not in completed_tasks]
 
-    user_id = sql.select(f"SELECT USER_ID FROM users WHERE TG_ID={message.from_user.id}")[0]
+    user_id = sql.select(f"SELECT user_id FROM users WHERE user_id={message.from_user.id}")[0]
     buttons = []
     for task in available_tasks:
         title = sql.select(f"SELECT title FROM tasks WHERE TASK_ID={task}")[0]
@@ -40,22 +41,18 @@ async def send_welcome(message: types.Message):
         return
 
     await message.answer(messages.WELCOME)
-    if sql.select(f"SELECT USER_ID FROM users WHERE TG_ID={message.from_user.id}") is None:
-        sql.update(f'INSERT INTO users(TG_ID) VALUES({message.from_user.id});')
-        sql.create_table(f"user_{message.from_user.id}", """
-            task INT PRIMARY KEY, 
-            score INT
-        """)
+    if sql.select(f"SELECT user_id FROM users WHERE user_id={message.from_user.id}") is None:
+        sql.update(f'INSERT INTO users(user_id) VALUES({message.from_user.id});')
         await message.answer("Введи свое имя и фамилию, чтобы мы точно начислили баллы именно тебе!")
         await Form.name.set()
 
 
 @dp.message_handler(state=Form.name)
 async def name_reg(message: types.Message, state: FSMContext):
-    sql.update(f"UPDATE users SET name='{message.text}' WHERE TG_ID={message.from_user.id}")
-    user_id = sql.select(f"SELECT USER_ID FROM users WHERE TG_ID={message.from_user.id}")[0]
+    sql.update(f"UPDATE users SET name='{message.text}' WHERE user_id={message.from_user.id}")
+    user_id = sql.select(f"SELECT user_id FROM users WHERE user_id={message.from_user.id}")[0]
 
-    buttons = [{'text': settings.CURATORS[curator], 'callback': f"setcurator;{user_id};{curator}"} for curator in settings.CURATORS.keys()]
+    buttons = [{'text': settings.CURATORS[curator_id], 'callback': f"setcurator;{user_id};{curator_id}"} for curator_id in settings.CURATORS.keys()]
     if settings.DEBUG: 
         buttons.append({'text': 'test', 'callback': f'setcurator;{user_id};596546865'})
     log.info(f'New user: {message.text}; UID: {user_id}')
@@ -66,8 +63,8 @@ async def name_reg(message: types.Message, state: FSMContext):
 @dp.message_handler(state=Form.feedback)
 async def resend_feedback(message: types.Message, state: FSMContext):
     await message.answer('Спасибо за обратную связь 😉') 
-    uid, name, curator = sql.select(f"SELECT USER_ID, name, curator FROM users WHERE TG_ID={message.from_user.id}")
-    await bot.send_message(curator, f"Отзыв от {name} UID: {uid}:\n\n{message.text}")
+    uid, name, curator_id = sql.select(f"SELECT user_id, name, curator_id FROM users WHERE user_id={message.from_user.id}")
+    await bot.send_message(curator_id, f"Отзыв от {name} UID: {uid}:\n\n{message.text}")
     log.info(f'Feedback from {uid} {name}')
     await state.finish()
 
@@ -108,7 +105,7 @@ async def do_request(message: types.Message):
 @dp.message_handler(lambda message: message.text == 'Выбрать задание')
 async def choose_task(message: types.Message):
     tasks = await get_tasks(message)
-    if sql.select(f"SELECT curator FROM users WHERE tg_id={message.from_user.id}")[0] is None:
+    if sql.select(f"SELECT curator_id FROM users WHERE tg_id={message.from_user.id}")[0] is None:
         await message.answer("Чтобы выбрать задание, для начала нужно выбрать куратора, сделать это можно с помощью команды /start")
         return
     if not tasks:
@@ -119,11 +116,11 @@ async def choose_task(message: types.Message):
 
 @dp.message_handler(content_types=["photo"])
 async def verify_task(message: types.Message): 
-    if sql.select(f"SELECT current_task FROM users WHERE TG_ID={message.from_user.id}")[0] is None:
+    if sql.select(f"SELECT current_task FROM users WHERE user_id={message.from_user.id}")[0] is None:
         await message.answer('Нужно выбрать задание нажав на кнопку под полем ввода сообщений!')
         return 
     
-    user_id, task_id, curator = sql.select(f"SELECT USER_ID, current_task, curator FROM users WHERE TG_ID={message.from_user.id}")
+    user_id, task_id, curator_id = sql.select(f"SELECT user_id, current_task, curator_id FROM users WHERE user_id={message.from_user.id}")
     task_title = sql.select(f"SELECT title FROM tasks WHERE TASK_ID={task_id}")[0]
     user_table = f"user_{message.from_user.id}"
     task_score = sql.select(f"SELECT score FROM {user_table} WHERE task={task_id}")
@@ -141,21 +138,21 @@ async def verify_task(message: types.Message):
     buttons = [{'text': '⭐️'*value,'callback': f'rate;{user_id};{task_id};{value}'} for value in range(1, max_score+1)]
     buttons.append({'text': 'Отклонить задание', 'callback': f'reject;{user_id};{task_id};0'})
     
-    await bot.send_photo(curator, message.photo[-1].file_id, 
+    await bot.send_photo(curator_id, message.photo[-1].file_id, 
                         caption=f"Ответ по заданию {task_title}\n\nID пользователя: {user_id}\nID задания: {task_id}",
                         reply_markup=modules.markup.inline(buttons))
-    log.info(f'Send photo: {message.from_user.id} -> {curator}; Task ID: {task_id}')
+    log.info(f'Send photo: {message.from_user.id} -> {curator_id}; Task ID: {task_id}')
 
 
 @dp.callback_query_handler()
 async def callback_check(callback: types.CallbackQuery):
     await bot.edit_message_reply_markup(callback.message.chat.id, callback.message.message_id)
 
-    if callback.data.split(';')[0] == 'setcurator': 
-        action, user_id, curator =  callback.data.split(';')
-        user_id, curator = int(user_id), int(curator)
-        sql.update(f"UPDATE users SET curator={curator} WHERE USER_ID={user_id}")
-        await callback.message.answer(f'Твой куратор: {settings.CURATORS.get(curator)}!', reply_markup=modules.markup.reply(['Выбрать задание']))
+    if callback.data.startswith('setcurator'): 
+        action, user_id, curator_id =  callback.data.split(';')
+        user_id, curator_id = int(user_id), int(curator_id)
+        sql.update(f"UPDATE users SET curator_id={curator_id} WHERE user_id={user_id}")
+        await callback.message.answer(f'Твой куратор: {settings.CURATORS.get(curator_id)}!', reply_markup=modules.markup.reply(['Выбрать задание']))
 
         return
 
@@ -167,12 +164,12 @@ async def callback_check(callback: types.CallbackQuery):
     user_id, task_id, value = int(user_id), int(task_id), int(value)
 
     task_title = sql.select(f"SELECT title FROM tasks WHERE TASK_ID={task_id}")[0]
-    tg_id = sql.select(f"SELECT TG_ID FROM users WHERE USER_ID={user_id}")[0]
+    tg_id = sql.select(f"SELECT user_id FROM users WHERE user_id={user_id}")[0]
     user_table = f"user_{tg_id}"
 
     if action == 'rate':
         sql.update(f"UPDATE {user_table} SET score={value} WHERE task={task_id}")
-        sql.update(f"UPDATE users SET score=score+{value}, current_task=NULL WHERE USER_ID={user_id}")
+        sql.update(f"UPDATE users SET score=score+{value}, current_task=NULL WHERE user_id={user_id}")
         log.info(f'Rate UID: {user_id} TID: {task_id} SCORE: {value}')
 
         await bot.send_message(tg_id, f'Вам начисленно {value} баллов!')
@@ -184,7 +181,7 @@ async def callback_check(callback: types.CallbackQuery):
         await bot.send_message(tg_id, f"Задание {task_title} отклоненно куратором")
 
     if action == 'settask':
-        sql.update(f'UPDATE users SET current_task={task_id} WHERE USER_ID={user_id}')
+        sql.update(f'UPDATE users SET current_task={task_id} WHERE user_id={user_id}')
 
         await callback.message.answer(f'Вы выбрали {task_title} в качестве активного задания!')
 
@@ -194,10 +191,9 @@ if __name__ == '__main__':
         log.warning("Start On Release Bot")
 
     sql.create_table("users", """
-        USER_ID INTEGER PRIMARY KEY AUTOINCREMENT, 
-        TG_ID INT, 
+        user_id INTEGER PRIMARY KEY UNIQUE, 
         current_task INT, 
-        curator INT,
+        curator_id INT,
         name TEXT,
         score INT DEFAULT 0 NOT NULL
     """)
@@ -205,6 +201,16 @@ if __name__ == '__main__':
         TASK_ID INTEGER PRIMARY KEY AUTOINCREMENT, 
         title TEXT,
         max_score INT NOT NULL
+    """)
+    sql.create_table("users_tasks", """
+        user_id INTEGER PRIMARY KEY UNIQUE, 
+        task_id INTEGER PRIMARY KEY UNIQUE, 
+        score INT
+    """)
+    sql.create_table("curators", """
+        id INTEGER PRIMARY KEY UNIQUE, 
+        first_name TEXT,
+        last_name TEXT
     """)
 
     executor.start_polling(dp)

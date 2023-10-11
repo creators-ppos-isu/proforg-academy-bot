@@ -1,4 +1,10 @@
 import sqlite3
+from enum import Enum
+
+
+class SelectType(Enum):
+    ALL = 0
+    ONE = 1
 
 
 class Sql:
@@ -35,7 +41,6 @@ class Sql:
         cursor = db.cursor()
         cursor.execute(query)
         db.commit()
-
 
 class User:
     def __init__(self, user_id: int):
