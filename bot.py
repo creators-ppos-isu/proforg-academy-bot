@@ -9,7 +9,12 @@ from modules import sqlmanager
 import messages
 
 log = logging.getLogger(__name__)
-logging.basicConfig(level=logging.INFO, format="[%(levelname)s] - %(asctime)s - %(message)s", encoding='utf-8', filename='log.log')
+logging.basicConfig(
+    level=logging.INFO, 
+    format="[%(levelname)s] - %(asctime)s - %(message)s",
+    encoding='utf-8', 
+    filename='bot.log'
+)
 # token = settings.D_TOKEN if settings.DEBUG else settings.R_TOKEN
 bot = Bot(token=settings.TOKEN)
 dp = Dispatcher(bot, storage=MemoryStorage())
@@ -25,7 +30,7 @@ async def get_tasks(message: types.Message):
     completed_tasks = sql.select(f"SELECT task_id FROM users_tasks WHERE user_id={message.from_user.id}", 0)
     available_tasks = [task[0] for task in all_task if task not in completed_tasks]
 
-    user_id = sql.select(f"SELECT user_id FROM users WHERE user_id={message.from_user.id}")[0]
+    user_id = message.from_user.id
     buttons = []
     for task in available_tasks:
         title = sql.select(f"SELECT title FROM tasks WHERE TASK_ID={task}")[0]
@@ -50,7 +55,7 @@ async def send_welcome(message: types.Message):
 @dp.message_handler(state=Form.name)
 async def name_reg(message: types.Message, state: FSMContext):
     sql.update(f"UPDATE users SET name='{message.text}' WHERE user_id={message.from_user.id}")
-    user_id = sql.select(f"SELECT user_id FROM users WHERE user_id={message.from_user.id}")[0]
+    user_id = message.from_user.id
 
     buttons = [{'text': settings.CURATORS[curator_id], 'callback': f"setcurator;{user_id};{curator_id}"} for curator_id in settings.CURATORS.keys()]
     if settings.DEBUG: 
@@ -166,7 +171,7 @@ async def callback_check(callback: types.CallbackQuery):
     user_id, task_id, score = int(user_id), int(task_id), int(score)
 
     task_title = sql.select(f"SELECT title FROM tasks WHERE TASK_ID={task_id}")[0]
-    tg_id = sql.select(f"SELECT user_id FROM users WHERE user_id={user_id}")[0]
+    tg_id = user_id
 
     if action == 'rate':
         sql.update(f"UPDATE users_tasks SET score={score} WHERE task_id={task_id} AND user_id={user_id}")
@@ -215,4 +220,4 @@ if __name__ == '__main__':
         last_name TEXT
     """)
 
-    executor.start_polling(dp)
+    executor.start_polling(dp, skip_updates=True)
