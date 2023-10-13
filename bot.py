@@ -22,7 +22,7 @@ class Form(StatesGroup):
 
 async def get_tasks(message: types.Message):
     all_task = sql.select(f"SELECT TASK_ID FROM tasks", 0)
-    completed_tasks = sql.select(f"SELECT task FROM user_{message.from_user.id}", 0)
+    completed_tasks = sql.select(f"SELECT task_id FROM users_tasks WHERE user_id={message.from_user.id}", 0)
     available_tasks = [task[0] for task in all_task if task not in completed_tasks]
 
     user_id = sql.select(f"SELECT user_id FROM users WHERE user_id={message.from_user.id}")[0]
@@ -92,7 +92,7 @@ async def do_request(message: types.Message):
             await message.answer(f"Не удалось удалить задание: {e}")
     
     if 'feedback' in message.text: 
-        users = sql.select(f"SELECT tg_id FROM users", 0)
+        users = sql.select(f"SELECT id FROM users", 0)
         buttons = [{'text': 'Отправить отзыв', 'callback': 'send_feedback'}]
         for user in users:
             try: 
@@ -105,12 +105,15 @@ async def do_request(message: types.Message):
 @dp.message_handler(lambda message: message.text == 'Выбрать задание')
 async def choose_task(message: types.Message):
     tasks = await get_tasks(message)
-    if sql.select(f"SELECT curator_id FROM users WHERE tg_id={message.from_user.id}")[0] is None:
+
+    if sql.select(f"SELECT curator_id FROM users WHERE user_id={message.from_user.id}")[0] is None:
         await message.answer("Чтобы выбрать задание, для начала нужно выбрать куратора, сделать это можно с помощью команды /start")
         return
+
     if not tasks:
         await message.answer('Больше нет доступных заданий!')
         return
+
     await message.answer('Выберите задание', reply_markup=modules.markup.inline(tasks))
 
 
@@ -122,11 +125,10 @@ async def verify_task(message: types.Message):
     
     user_id, task_id, curator_id = sql.select(f"SELECT user_id, current_task, curator_id FROM users WHERE user_id={message.from_user.id}")
     task_title = sql.select(f"SELECT title FROM tasks WHERE TASK_ID={task_id}")[0]
-    user_table = f"user_{message.from_user.id}"
-    task_score = sql.select(f"SELECT score FROM {user_table} WHERE task={task_id}")
+    task_score = sql.select(f"SELECT score FROM users_tasks WHERE task_id={task_id} AND user_id={user_id}")
     
     if not task_score:
-        sql.update(f"INSERT INTO {user_table}(task, score) VALUES({task_id}, 0);")
+        sql.update(f'INSERT INTO users_tasks(user_id, task_id, score) VALUES({user_id}, {task_id}, 0)')
 
     elif task_score[0] == 0:
         await message.answer(messages.ERR_ANSWER_ALREADY_SENT)
@@ -160,23 +162,23 @@ async def callback_check(callback: types.CallbackQuery):
         await callback.message.answer('Напиши свой отзыв о лекции в ответ на это сообщение')
         await Form.feedback.set()
 
-    action, user_id, task_id, value =  callback.data.split(';')
-    user_id, task_id, value = int(user_id), int(task_id), int(value)
+    action, user_id, task_id, score =  callback.data.split(';')
+    user_id, task_id, score = int(user_id), int(task_id), int(score)
 
     task_title = sql.select(f"SELECT title FROM tasks WHERE TASK_ID={task_id}")[0]
     tg_id = sql.select(f"SELECT user_id FROM users WHERE user_id={user_id}")[0]
-    user_table = f"user_{tg_id}"
 
     if action == 'rate':
-        sql.update(f"UPDATE {user_table} SET score={value} WHERE task={task_id}")
-        sql.update(f"UPDATE users SET score=score+{value}, current_task=NULL WHERE user_id={user_id}")
-        log.info(f'Rate UID: {user_id} TID: {task_id} SCORE: {value}')
+        sql.update(f"UPDATE users_tasks SET score={score} WHERE task_id={task_id} AND user_id={user_id}")
+        sql.update(f"UPDATE users SET score=score+{score}, current_task=NULL WHERE user_id={user_id}")
+        log.info(f'Rate UID: {user_id} TID: {task_id} SCORE: {score}')
 
-        await bot.send_message(tg_id, f'Вам начисленно {value} баллов!')
+        await bot.send_message(tg_id, f'Вам начисленно {score} баллов!')
 
     if action == 'reject':
-        sql.update(f"DELETE FROM {user_table} WHERE task={task_id}")
-        log.info(f'Reject UID: {user_id} TID: {task_id} SCORE: {value}')
+        sql.update(f'DELETE FROM users_tasks WHERE task_id={task_id} AND user_id={user_id} LIMIT 1')
+        # sql.update(f"DELETE FROM {user_table} WHERE task={task_id}")
+        log.info(f'Reject UID: {user_id} TID: {task_id} SCORE: {score}')
 
         await bot.send_message(tg_id, f"Задание {task_title} отклоненно куратором")
 
@@ -203,8 +205,8 @@ if __name__ == '__main__':
         max_score INT NOT NULL
     """)
     sql.create_table("users_tasks", """
-        user_id INTEGER PRIMARY KEY UNIQUE, 
-        task_id INTEGER PRIMARY KEY UNIQUE, 
+        user_id INTEGER, 
+        task_id INTEGER, 
         score INT
     """)
     sql.create_table("curators", """
