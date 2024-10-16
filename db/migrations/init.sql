@@ -15,7 +15,7 @@ CREATE TABLE IF NOT EXISTS task (
 CREATE TABLE IF NOT EXISTS user_task (
     user_id INTEGER, 
     task_id INTEGER, 
-    score INT
+    score INT DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS curator (

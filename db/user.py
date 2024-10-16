@@ -27,3 +27,11 @@ async def set_user_curator(conn: aiosqlite.Connection, user_id: int, curator_id:
 
 async def get_uncompleted_tasks(conn: aiosqlite.Connection, user_id: int) -> list[tuple[int, int]]:
     return await conn.execute_fetchall("SELECT t.id, t.title FROM task t WHERE t.id NOT IN (SELECT ut.task_id FROM user_task ut WHERE ut.user_id=?)", (user_id,))
+
+
+async def get_user_info(conn: aiosqlite.Connection, user_id: int) -> tuple:
+    async with conn.cursor() as cur:
+        await cur.execute("SELECT id, first_name, last_name, course, curator_id FROM user WHERE id=?", (user_id,))
+        user_info = await cur.fetchone()
+
+    return user_info
