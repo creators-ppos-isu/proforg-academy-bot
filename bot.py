@@ -68,7 +68,7 @@ async def get_available_tasks(update: Update, context: ContextTypes.DEFAULT_TYPE
         tasks = await user.get_uncompleted_tasks(conn, user_id=update.effective_user.id)
 
     if not tasks:
-        return await update.effective_message.answer("Больше нет доступных заданий!")
+        return await update.effective_message.reply_text("Больше нет доступных заданий!")
 
     await update.effective_message.reply_text(
         "Выбери задание",
@@ -99,11 +99,13 @@ async def set_task(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
 
 
 async def process_task_response(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Пользователь отправляет ответ на задание"""
+
     if "current_task_id" not in context.user_data:
         return await update.effective_message.reply_text("Не выбрано активное задание")
 
     task_id = int(context.user_data["current_task_id"])
-    user_id = update.effective_message.id
+    user_id = update.effective_user.id
 
     async with aiosqlite.connect(settings.DB_NAME) as conn:
         if await task.is_task_response_exists(conn, task_id=task_id, user_id=update.effective_user.id):
@@ -118,45 +120,50 @@ async def process_task_response(update: Update, context: ContextTypes.DEFAULT_TY
     await update.effective_message.copy(
         chat_id=curator_id,
         caption=f"Ответ по заданию {task_title}\n\nID пользователя: {user_id}\nID задания: {task_id}",
-        reply_markup=InlineKeyboardMarkup.from_column([
-            *[
-                InlineKeyboardButton(text=f"{value} ⭐️", callback_data=f"task_rate:{user_id}:{task_id}:{value}")
-                for value in range(1, task_max_score + 1)
-            ],
-            InlineKeyboardButton(text="Отклонить", callback_data=f"task_rate:{user_id}:{task_id}:-1")
-        ])
+        reply_markup=InlineKeyboardMarkup.from_column(
+            [
+                *[
+                    InlineKeyboardButton(text=f"{value} ⭐️", callback_data=f"task_rate:{user_id}:{task_id}:{value}")
+                    for value in range(1, task_max_score + 1)
+                ],
+                InlineKeyboardButton(text="Отклонить", callback_data=f"task_rate:{user_id}:{task_id}:-1"),
+            ]
+        ),
     )
 
     logger.info(f"Sent <Task {task_id}> response from {user_id} to {curator_id}")
 
+    return ConversationHandler.END
 
-# @dp.callback_query_handler()
-# async def callback_check(callback: types.CallbackQuery):
-#     await bot.edit_message_reply_markup(callback.message.chat.id, callback.message.message_id)
 
-#     if callback.data.startswith("send_feedback"):
-#         await callback.message.answer("Напиши свой отзыв о лекции в ответ на это сообщение")
-#         await Form.feedback.set()
+async def task_rate(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обработка оценки задания от куратора"""
 
-#     action, user_id, task_id, score = callback.data.split(";")
-#     user_id, task_id, score = int(user_id), int(task_id), int(score)
+    query = update.callback_query
+    await query.answer()
 
-#     task_title = sql.select(f"SELECT title FROM task WHERE TASK_ID={task_id}")[0]
-#     tg_id = user_id
+    _, user_id, task_id, score = query.data.split(":")
+    bot = update.get_bot()
 
-#     if action == "rate":
-#         sql.update(f"UPDATE users_tasks SET score={score} WHERE task_id={task_id} AND user_id={user_id}")
-#         sql.update(f"UPDATE user SET score=score+{score}, current_task=NULL WHERE user_id={user_id}")
-#         logger.info(f"Rate UID: {user_id} TID: {task_id} SCORE: {score}")
+    user_notify_text = None
 
-#         await bot.send_message(tg_id, f"Вам начисленно {score} баллов!")
+    async with aiosqlite.connect(settings.DB_NAME) as conn:
+        _, task_title, _ = await task.get_task_info(conn, task_id=task_id)
 
-#     if action == "reject":
-#         sql.update(f"DELETE FROM users_tasks WHERE task_id={task_id} AND user_id={user_id} LIMIT 1")
-#         # sql.update(f"DELETE FROM {user_table} WHERE task={task_id}")
-#         logger.info(f"Reject UID: {user_id} TID: {task_id} SCORE: {score}")
+        if score == -1:
+            # Куратор отклонил задание
+            await task.delete_task_response(conn, task_id=task_id, user_id=user_id)
+            user_notify_text = f"Ответ на задание '{task_title}' отклонен куратором"
+        else:
+            # Куратор выставил ответ на задание
+            await task.rate_task_response(conn, task_id=task_id, user_id=user_id, score=score)
+            user_notify_text = f"Вам начисленно {score} баллов за ответ на задание '{task_title}'!"
 
-#         await bot.send_message(tg_id, f"Задание {task_title} отклоненно куратором")
+    await bot.send_message(chat_id=user_id, text=user_notify_text)
+    await update.effective_message.edit_reply_markup()
+    logger.info(
+        f"<Curator {update.effective_user.id}> rate <Task {task_id}> response from <User {user_id}> for {score}"
+    )
 
 
 HANDLERS = [
@@ -168,6 +175,7 @@ HANDLERS = [
         },
         fallbacks=[CommandHandler("cancel", cmd_cancel)],
     ),
+    CallbackQueryHandler(task_rate, pattern="^task_rate:"),
 ]
 
 

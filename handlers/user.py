@@ -69,6 +69,7 @@ async def process_course(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
     async with aiosqlite.connect(settings.DB_NAME) as conn:
         curators_info = await curator.get_all_curators(conn)
+        await user.set_user_course(conn, user_id=update.effective_user.id, course=int(course))
 
     logger.info(f"Set course {update.effective_user.id}: {course}")
 
@@ -99,7 +100,7 @@ async def process_curator(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     await update.effective_message.edit_text(f"Ты выбрал куратора: {first_name} {last_name}")
     await update.effective_message.reply_text(
         "Для выбора задания используй кнопку внизу 👇",
-        reply_markup=ReplyKeyboardMarkup.from_column(["Выбрать задание"]),
+        reply_markup=ReplyKeyboardMarkup.from_column(["Выбрать задание"], resize_keyboard=True),
     )
 
     return ConversationHandler.END
