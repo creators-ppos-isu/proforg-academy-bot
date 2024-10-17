@@ -16,22 +16,20 @@ import messages
 import settings
 from db import curator, user
 from handlers.command import cmd_cancel
+from handlers.states import COURSE, FULL_NAME, SET_CURATOR
 
 logger = logging.getLogger("user")
-
-FULL_NAME = 10
-COURSE = 11
-SET_CURATOR = 12
 
 
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     user_id = update.effective_user.id
-    if user_id in settings.CURATORS.keys():
-        return await update.effective_message.reply_text("Приветствую тебя, куратор!")
-
-    await update.effective_message.reply_html(messages.WELCOME)
-
     async with aiosqlite.connect(settings.DB_NAME) as conn:
+        if await curator.is_user_curator(conn, user_id):
+            await update.effective_message.reply_text("Приветствую тебя, куратор!")
+            return ConversationHandler.END
+
+        await update.effective_message.reply_html(messages.WELCOME)
+
         if not await user.is_user_exists(conn, user_id):
             await user.add_user(conn, user_id)
             logger.info(f"Added user {user_id}")

@@ -40,6 +40,4 @@ async def get_uncompleted_tasks(conn: aiosqlite.Connection, user_id: int) -> lis
 async def get_user_info(conn: aiosqlite.Connection, user_id: int) -> tuple[int, str, str, int, int]:
     async with conn.cursor() as cur:
         await cur.execute("SELECT id, first_name, last_name, course, curator_id FROM user WHERE id=?", (user_id,))
-        user_info = await cur.fetchone()
-
-    return user_info
+        return await cur.fetchone()

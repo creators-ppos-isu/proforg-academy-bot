@@ -4,9 +4,7 @@ import aiosqlite
 async def get_task_info(conn: aiosqlite.Connection, task_id: int) -> tuple[int, str, int]:
     async with conn.cursor() as cur:
         await cur.execute("SELECT id, title, max_score FROM task WHERE id=?", (task_id,))
-        task = await cur.fetchone()
-
-    return task
+        return await cur.fetchone()
 
 
 async def add_task_response(conn: aiosqlite.Connection, task_id: int, user_id: int):
